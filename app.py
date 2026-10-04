@@ -17,6 +17,38 @@ def format_seat_no(value):
     except (ValueError, TypeError):
         return s
 
+
+def _pdf_prepare_df(df):
+    """Prepare PDF rows without dropping entries because of column-name variants."""
+    if df is None:
+        return pd.DataFrame()
+    d = df.copy()
+    # Normalize common column names while retaining all rows.
+    aliases = {
+        "Name": ["Student Name", "Name", "Student"],
+        "Roll No": ["Roll No", "Roll Number", "Enrollment No", "Enrollment Number", "Roll"],
+        "Course": ["Course", "Program", "Course Name"],
+        "Seat No": ["Seat No.", "Seat No", "Seat Number", "Seat"],
+        "Room No": ["Room No.", "Room No", "Room Number", "Room"],
+        "Answer Sheet No": ["Answer Sheet No.", "Answer Sheet No", "Answer Sheet Number", "AnswerSheet No"],
+    }
+    for target, names in aliases.items():
+        if target in d.columns:
+            continue
+        for name in names:
+            if name in d.columns:
+                d[target] = d[name]
+                break
+        if target not in d.columns:
+            d[target] = ""
+    d["Seat No"] = d["Seat No"].apply(format_seat_no)
+    d["Roll No"] = d["Roll No"].apply(lambda x: "" if pd.isna(x) else str(x).replace(".0","") if str(x).endswith(".0") else str(x))
+    d["Name"] = d["Name"].fillna("").astype(str)
+    d["Course"] = d["Course"].fillna("").astype(str)
+    d["Room No"] = d["Room No"].fillna("").astype(str)
+    d["Answer Sheet No"] = d["Answer Sheet No"].apply(format_seat_no)
+    return d.reset_index(drop=True)
+
 import streamlit as st
 
 st.set_page_config(page_title='ODD Minor Exam Manager', page_icon='🎓', layout='wide')
@@ -90,7 +122,7 @@ def _add_seat_numbers(df):
     return out
 
 def pdf_room_attendance(df, room, date_str, shift):
-    df = df.copy()
+    d = _pdf_prepare_df(df)
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -138,7 +170,7 @@ def pdf_room_attendance(df, room, date_str, shift):
     return buf.getvalue()
 
 def pdf_course_allocation(df, course, date_str, shift):
-    df = df.copy()
+    d = _pdf_prepare_df(df)
     # Exact requested format: Sr. No | Name | Roll No | Seat No | Room No — Portrait A4.
     d=_add_seat_numbers(df)
     out=pd.DataFrame()
@@ -452,159 +484,28 @@ def build_room_pdfs_for_date(date_value, shift_value):
     for room in sorted(d["Room"].dropna().astype(str).unique()):
         rv=d[d["Room"].astype(str)==room].copy()
         pdf=pdf_room_attendance(rv,room,str(date_value),str(shift_value))
+        if not pdf:
+            continue
         result[f"{_safe_filename(room)}_{_safe_filename(shift_value)}_{_safe_filename(date_value)}.pdf"]=pdf
     return result
 
 def build_course_room_pdfs_for_date(date_value, shift_value, selected_courses=None):
-    """Despite the historical function name, generate ONE course-wise allocation PDF per course."""
-    d,sched=attendance_for_actual_papers(date_value,shift_value)
-    if d.empty or 'Course' not in d.columns: return {}
+    """Create one populated A4-portrait PDF per eligible course."""
+    d, sched = attendance_for_actual_papers(date_value, shift_value)
+    if d.empty or "Course" not in d.columns:
+        return {}
     if selected_courses:
-        d=d[d['Course'].astype(str).isin([str(x) for x in selected_courses])]
-    result={}
-    for course,rv in d.groupby('Course',dropna=False):
-        course=str(course)
-        pdf=pdf_course_allocation(rv,course,str(date_value),str(shift_value))
-        result[f'{_safe_filename(course)}_{_safe_filename(shift_value)}_{_safe_filename(date_value)}.pdf']=pdf
+        d = d[d["Course"].astype(str).isin([str(x) for x in selected_courses])].copy()
+    result = {}
+    for course, rv in d.groupby("Course", dropna=False):
+        course = str(course)
+        rv = rv.copy()
+        if rv.empty:
+            continue
+        pdf = pdf_course_allocation(rv, course, str(date_value), str(shift_value))
+        if pdf:
+            result[f"{_safe_filename(course)}_{_safe_filename(shift_value)}_{_safe_filename(date_value)}.pdf"] = pdf
     return result
-
-
-tabs=st.tabs(['📊 Dashboard','🏫 Room-wise Attendance','📚 Course Count','👨‍🎓 Student Search','🪑 Seating','🗓️ Datesheet','📄 PDF Reports','📦 Bulk PDF Downloads','📝 DET Updates'])
-
-with tabs[0]:
-    st.subheader('Exam Operations Dashboard')
-    if not att.empty:
-        room_counts=af.groupby('Room').size().sort_values(ascending=False)
-        st.markdown('**Students / attendance records by room**')
-        st.bar_chart(room_counts)
-        a,b=st.columns(2)
-        with a:
-            st.markdown('**Room summary**')
-            st.dataframe(af.groupby(['Date','Shift','Room']).size().reset_index(name='Students'),use_container_width=True,hide_index=True)
-        with b:
-            st.markdown('**Course summary**')
-            st.dataframe(af.groupby('Course').size().reset_index(name='Students').sort_values('Students',ascending=False),use_container_width=True,hide_index=True)
-
-with tabs[1]:
-    st.subheader('Room-wise Attendance Sheet')
-    if af.empty: st.info('No attendance records for the selected filters.')
-    else:
-        room_view=af.copy()
-        preview_cols=[c for c in ['S.No','Name','Enrollment No','Course','Answer Sheet No','Signature'] if c in room_view.columns]
-        st.markdown('**Room PDF:** Sr. No | Seat No | Name | Roll No | Course | Answer Sheet No | Signature — Portrait A4')
-        st.dataframe(room_view[preview_cols] if preview_cols else room_view,use_container_width=True,hide_index=True)
-        csv=room_view.to_csv(index=False).encode('utf-8')
-        st.download_button('⬇️ Download Room Attendance CSV',csv,'roomwise_attendance.csv','text/csv')
-        if sel_room!='All':
-            dstr=sel_date if sel_date!='All' else 'All Dates'; sh=sel_shift if sel_shift!='All' else 'All Shifts'
-            st.download_button('📄 Generate Room Attendance PDF',pdf_room_attendance(room_view,sel_room,dstr,sh),f'{sel_room}_Attendance.pdf','application/pdf')
-        else:
-            st.info('Select a specific room in the sidebar to generate its dedicated PDF attendance sheet.')
-
-with tabs[2]:
-    st.subheader('Student Count of a Specific Course — Room-wise')
-    source_df = af.copy()
-    if source_df.empty:
-        st.warning('No attendance/allocation data is available for the selected date/shift.')
-    else:
-        course_options = sorted(source_df['Course'].dropna().astype(str).unique().tolist())
-        selected_course = st.selectbox('Select Course', course_options, key='course_room_count')
-        cv = source_df[source_df['Course'].astype(str) == selected_course].copy()
-        total = len(cv)
-        room_summary = cv.groupby('Room', dropna=False).size().reset_index(name='Student Count').sort_values(
-            ['Student Count','Room'], ascending=[False,True])
-        a,b=st.columns(2)
-        a.metric(f'Total {selected_course} students', total)
-        b.metric('Rooms used', room_summary['Room'].nunique())
-        st.markdown(f'### {selected_course} — Students in Each Room')
-        st.dataframe(room_summary,use_container_width=True,hide_index=True)
-        if not room_summary.empty:
-            st.bar_chart(room_summary.set_index('Room')['Student Count'])
-        if not sl.empty:
-            check=sl.copy()
-            if sel_date!='All': check=check[check['Date'].astype(str)==sel_date]
-            if sel_shift!='All': check=check[check['Shift'].astype(str)==sel_shift]
-            check=check[check['Course'].astype(str)==selected_course]
-            if len(check)!=total:
-                st.warning(f'Cross-check: course-wise student list has {len(check)} records, while room allocation has {total}. Review the source files.')
-            else:
-                st.success('Cross-check passed: course-wise student list and room allocation counts match.')
-        st.download_button('⬇️ Download Course × Room Count CSV',room_summary.to_csv(index=False).encode('utf-8'),
-                           f'{selected_course}_roomwise_count.csv','text/csv')
-
-with tabs[3]:
-    st.subheader('Student Search')
-    if not sl.empty:
-        q=st.text_input('Enrollment No / Student Name / Course / Room')
-        v=sl.copy()
-        if q:
-            mask=v.astype(str).apply(lambda c:c.str.contains(q,case=False,na=False)).any(axis=1); v=v[mask]
-        st.metric('Matching students',len(v))
-        st.dataframe(v,use_container_width=True,hide_index=True)
-
-with tabs[4]:
-    st.subheader('Seating Plan')
-    if not sp.empty:
-        v=sp.copy()
-        st.dataframe(v,use_container_width=True,hide_index=True)
-    else: st.info('Seating workbook data was not detected.')
-
-with tabs[5]:
-    st.subheader('Class Test Datesheet')
-    if datesheet.empty: st.info('Datesheet not detected.')
-    else:
-        v=datesheet.copy()
-        q=st.text_input('Search paper code / paper name / program')
-        if q:
-            v=v[v.astype(str).apply(lambda c:c.str.contains(q,case=False,na=False)).any(axis=1)]
-        st.dataframe(v,use_container_width=True,hide_index=True)
-        st.download_button('⬇️ Download Datesheet CSV',v.to_csv(index=False).encode('utf-8'),'datesheet.csv','text/csv')
-
-with tabs[6]:
-    st.subheader('PDF Report Generator')
-    report=st.selectbox('Report Type',['Room Attendance PDF (Portrait)','Course × Room Count PDF','Filtered Attendance PDF'])
-    if report=='Room Attendance PDF':
-        rr=st.selectbox('Room',rooms)
-        rv=att[att['Room'].astype(str)==rr].copy()
-        if sel_date!='All': rv=rv[rv['Date'].astype(str)==sel_date]
-        if sel_shift!='All': rv=rv[rv['Shift'].astype(str)==sel_shift]
-        st.write(f'**{rr}: {len(rv)} students**')
-        st.download_button('📄 Generate PDF',pdf_room_attendance(rv,rr,sel_date,sel_shift),f'{rr}_Attendance.pdf','application/pdf')
-    elif report=='Course Student Count PDF':
-        if sl.empty: st.warning('No course data.')
-        else:
-            cc=st.selectbox('Course',sorted(sl['Course'].astype(str).unique()))
-            cv=sl[sl['Course'].astype(str)==cc].copy()
-            if sel_date!='All': cv=cv[cv['Date'].astype(str)==sel_date]
-            if sel_shift!='All': cv=cv[cv['Shift'].astype(str)==sel_shift]
-            st.write(f'**{cc}: {len(cv)} students**')
-            cols=[c for c in ['S.No','Name','Enrollment No','Seat No','Room','Date','Shift','Course'] if c in cv.columns]
-            st.download_button('📄 Generate PDF',pdf_course_summary(cv[cols],cc,sel_date,sel_shift),f'{cc}_Student_List.pdf','application/pdf')
-    else:
-        rv=af.copy(); st.write(f'Filtered records: **{len(rv)}**')
-        st.download_button('📄 Generate PDF',pdf_table('Filtered Attendance Report',f'Date: {sel_date} | Shift: {sel_shift} | Room: {sel_room} | Course: {sel_course}',rv,True,26),'Filtered_Attendance.pdf','application/pdf')
-
-st.sidebar.divider(); st.sidebar.caption(f'Loaded: {source}')
-
-
-with tabs[8]:
-    st.subheader('📝 DET Student Name Updates')
-    st.write('Upload an Excel file containing Roll No. and Student Name. Matching Roll No. values are marked by appending **(det)** to the student name.')
-    if det_master.empty:
-        st.info('Upload the DET Excel file from the sidebar.')
-    else:
-        st.metric('Roll numbers in DET Excel',len(det_master))
-        st.dataframe(det_master,use_container_width=True,hide_index=True)
-        matched=att[att['Enrollment No'].apply(normalize_roll).isin(set(det_master['Roll No'].astype(str)))].copy() if not att.empty and 'Enrollment No' in att else pd.DataFrame()
-        if not matched.empty:
-            st.success(f'{len(matched)} attendance record(s) matched.')
-            show=[c for c in ['Date','Shift','Room','S.No','Name','Enrollment No','Course','Answer Sheet No'] if c in matched.columns]
-            st.dataframe(matched[show],use_container_width=True,hide_index=True)
-            st.download_button('⬇️ Download DET-marked attendance CSV',matched.to_csv(index=False).encode('utf-8'),'det_marked_attendance.csv','text/csv')
-        else:
-            st.warning('No uploaded Roll No. matched the attendance records.')
-        st.caption('The original ZIP is not modified. DET marking is applied only in the current app session.')
-
 
 with tabs[7]:
     st.subheader("📦 Bulk PDF Downloads — Scheduled Papers Only")
