@@ -131,7 +131,10 @@ def _add_seat_numbers(df):
     return out
 
 def pdf_room_attendance(df, room, date_str, shift):
-    d = _pdf_prepare_df(df)
+    """Generate a populated A4 portrait room attendance PDF.
+    Every input row is represented exactly once; only the requested display
+    columns and seat-number formatting are applied.
+    """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -139,56 +142,105 @@ def pdf_room_attendance(df, room, date_str, shift):
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
     from reportlab.lib.units import mm
 
-    # Exact requested columns: Sr. No | Seat No | Name | Roll No | Course | Answer Sheet No | Signature
-    d=_add_seat_numbers(df)
-    out=pd.DataFrame()
-    out['Sr. No']=range(1,len(d)+1)
-    out['Seat No']=d['Seat No'].astype(str) if 'Seat No' in d else ''
-    out['Name']=d['Name'].astype(str) if 'Name' in d else ''
-    out['Roll No']=d['Enrollment No'].apply(_roll) if 'Enrollment No' in d else ''
-    out['Course']=d['Course'].astype(str) if 'Course' in d else ''
-    out['Answer Sheet No']=d['Answer Sheet No'].fillna('').astype(str) if 'Answer Sheet No' in d else ''
-    out['Signature']=''
+    if df is None or df.empty:
+        return None
 
-    buf=io.BytesIO()
-    doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=5*mm,leftMargin=5*mm,topMargin=7*mm,bottomMargin=7*mm)
-    styles=getSampleStyleSheet()
-    title_style=ParagraphStyle('roomtitle2',parent=styles['Title'],alignment=TA_CENTER,fontSize=12,leading=14)
-    sub_style=ParagraphStyle('roomsub2',parent=styles['Normal'],alignment=TA_CENTER,fontSize=7.5,leading=9)
-    cell=ParagraphStyle('roomcell2',parent=styles['Normal'],fontSize=6.2,leading=7)
-    head=ParagraphStyle('roomhead2',parent=styles['Normal'],fontSize=6.2,leading=7,alignment=TA_CENTER)
+    d = _pdf_prepare_df(df)
+    d = _add_seat_numbers(d)
+
+    # Preserve source values as strings. Do not normalize roll numbers,
+    # names, courses, rooms, or answer-sheet values.
+    out = pd.DataFrame(index=d.index)
+    out['Sr. No'] = range(1, len(d) + 1)
+    out['Seat No'] = d['Seat No'].map(format_seat_no)
+    out['Name'] = d['Name'].map(lambda x: '' if pd.isna(x) else str(x))
+    out['Roll No'] = d['Roll No'].map(lambda x: '' if pd.isna(x) else str(x))
+    out['Course'] = d['Course'].map(lambda x: '' if pd.isna(x) else str(x))
+    out['Answer Sheet No'] = d['Answer Sheet No'].map(lambda x: '' if pd.isna(x) else str(x))
+    out['Signature'] = ''
+
+    # Hard guarantee: never create a blank PDF when source rows exist.
+    if len(out) != len(df) or len(out) == 0:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4, rightMargin=5*mm, leftMargin=5*mm,
+        topMargin=7*mm, bottomMargin=7*mm
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('roomtitle_final', parent=styles['Title'], alignment=TA_CENTER, fontSize=12, leading=14)
+    sub_style = ParagraphStyle('roomsub_final', parent=styles['Normal'], alignment=TA_CENTER, fontSize=7.5, leading=9)
+    cell = ParagraphStyle('roomcell_final', parent=styles['Normal'], fontSize=6.2, leading=7)
+    head = ParagraphStyle('roomhead_final', parent=styles['Normal'], fontSize=6.2, leading=7, alignment=TA_CENTER)
+
     story=[]
-    chunks=[out.iloc[i:i+24] for i in range(0,len(out),24)] or [out]
+    chunks=[out.iloc[i:i+24] for i in range(0, len(out), 24)]
     widths=[9*mm,16*mm,42*mm,25*mm,30*mm,27*mm,38*mm]
-    for pi,chunk in enumerate(chunks):
-        story += [Paragraph('ROOM-WISE ATTENDANCE SHEET',title_style),Paragraph(f'Room: {room} | Date: {date_str} | Shift: {shift} | Total Students: {len(out)}',sub_style),Spacer(1,3*mm)]
+
+    for pi, chunk in enumerate(chunks):
+        story += [
+            Paragraph('ROOM-WISE ATTENDANCE SHEET', title_style),
+            Paragraph(
+                f'Room: {room} | Date: {date_str} | Shift: {shift} | Total Students: {len(out)}',
+                sub_style
+            ),
+            Spacer(1,3*mm)
+        ]
         data=[[Paragraph(str(c),head) for c in out.columns]]
         for row in chunk.itertuples(index=False):
-            data.append([Paragraph('' if pd.isna(v) else str(v),cell) for v in row])
+            data.append([
+                Paragraph('' if pd.isna(v) else str(v), cell)
+                for v in row
+            ])
         tab=Table(data,colWidths=widths,repeatRows=1)
         tab.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e9eef5')),('GRID',(0,0),(-1,-1),0.4,colors.grey),
-            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),('ALIGN',(0,0),(-1,0),'CENTER'),
-            ('ALIGN',(0,0),(1,-1),'CENTER'),('ALIGN',(3,0),(5,-1),'CENTER'),
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e9eef5')),
+            ('GRID',(0,0),(-1,-1),0.4,colors.grey),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ('ALIGN',(0,0),(-1,0),'CENTER'),
+            ('ALIGN',(0,0),(1,-1),'CENTER'),
+            ('ALIGN',(3,0),(5,-1),'CENTER'),
             ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f8fafc')]),
-            ('LEFTPADDING',(0,0),(-1,-1),2),('RIGHTPADDING',(0,0),(-1,-1),2),('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3)
+            ('LEFTPADDING',(0,0),(-1,-1),2),('RIGHTPADDING',(0,0),(-1,-1),2),
+            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3)
         ]))
         story.append(tab)
-        if pi<len(chunks)-1: story.append(PageBreak())
+        if pi < len(chunks)-1:
+            story.append(PageBreak())
+
     doc.build(story)
     return buf.getvalue()
 
+
 def pdf_course_allocation(df, course, date_str, shift):
+    """Generate one populated A4 portrait course-wise allocation PDF."""
+    from reportlab.lib.pagesizes import A4
+
+    if df is None or df.empty:
+        return None
+
     d = _pdf_prepare_df(df)
-    # Exact requested format: Sr. No | Name | Roll No | Seat No | Room No — Portrait A4.
-    d=_add_seat_numbers(df)
-    out=pd.DataFrame()
-    out['Sr. No']=range(1,len(d)+1)
-    out['Name']=d['Name'].astype(str) if 'Name' in d else ''
-    out['Roll No']=d['Enrollment No'].apply(_roll) if 'Enrollment No' in d else ''
-    out['Seat No']=d['Seat No'].astype(str) if 'Seat No' in d else ''
-    out['Room No']=d['Room'].astype(str) if 'Room' in d else ''
-    return pdf_table(f'COURSE-WISE ALLOCATION — {course}',f'Date: {date_str} | Shift: {shift} | Total Students: {len(out)}',out,landscape_mode=False,rows_per_page=28)
+    d = _add_seat_numbers(d)
+
+    # Preserve all source values. Only seat number gets the requested
+    # integer-style display (1, 2, 3 instead of 1.0, 2.0, 3.0).
+    out = pd.DataFrame(index=d.index)
+    out['Sr. No'] = range(1, len(d) + 1)
+    out['Name'] = d['Name'].map(lambda x: '' if pd.isna(x) else str(x))
+    out['Roll No'] = d['Roll No'].map(lambda x: '' if pd.isna(x) else str(x))
+    out['Seat No'] = d['Seat No'].map(format_seat_no)
+    out['Room No'] = d['Room No'].map(lambda x: '' if pd.isna(x) else str(x))
+
+    if len(out) != len(df) or len(out) == 0:
+        return None
+
+    return pdf_table(
+        f'COURSE-WISE ALLOCATION — {course}',
+        f'Date: {date_str} | Shift: {shift} | Total Students: {len(out)}',
+        out, landscape_mode=False, rows_per_page=28
+    )
+
 
 def pdf_course_summary(df, course, date_str, shift):
     return pdf_course_allocation(df,course,date_str,shift)
