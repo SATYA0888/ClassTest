@@ -18,6 +18,15 @@ def format_seat_no(value):
         return s
 
 
+def format_roll_no(value):
+    if pd.isna(value):
+        return ""
+    s = str(value).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s
+
+
 def _pdf_prepare_df(df):
     """Prepare PDF rows without dropping entries because of column-name variants."""
     if df is None:
