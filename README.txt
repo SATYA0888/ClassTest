@@ -16,3 +16,6 @@ v5 bulk PDF features:
 
 
 v6: Bulk PDF downloads are schedule-aware. The app checks the Class Test Datesheet, maps shifts I-IV to the four time slots, and generates PDFs only for rooms/course groups whose paper is scheduled on the selected date and shift. The source workbook's date storage is normalized using its Validation sheet (05-09 Oct 2026).
+   # ODD Minor Exam Interactive Management System
+
+Bulk PDF output: course-wise allocation and room-wise attendance, portrait A4, filtered by actual scheduled paper/date/shift.
