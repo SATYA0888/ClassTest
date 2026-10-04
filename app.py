@@ -253,23 +253,63 @@ if det_file:
     except Exception as e:
         st.sidebar.error(f'Excel error: {e}')
 
-def apply_det(df, roll_col, name_col):
-    if df.empty or det_master.empty or roll_col not in df.columns or name_col not in df.columns:
-        return df.copy()
+def _find_roll_column(df):
+    """Find a roll/enrollment-number column across different source workbooks."""
+    if df.empty: return None
+    preferred=['Enrollment No','Roll No','Roll Number','RollNo','Enrollment Number','Enrolment No','Enrolment Number']
+    for c in preferred:
+        if c in df.columns: return c
+    for c in df.columns:
+        lc=str(c).strip().lower().replace('_',' ')
+        if ('roll' in lc and ('no' in lc or 'number' in lc)) or 'enrollment' in lc or 'enrolment' in lc:
+            return c
+    return None
+
+def _find_name_column(df):
+    if df.empty: return None
+    for c in ['Name','Student Name','Name of Student','Student_Name']:
+        if c in df.columns: return c
+    for c in df.columns:
+        lc=str(c).strip().lower()
+        if 'name' in lc and 'course' not in lc: return c
+    return None
+
+def apply_det(df, roll_col=None, name_col=None):
+    """Append (det) to every matching student's displayed name, using Roll No only.
+    The student's original name is preserved; (det) is added exactly once.
+    """
+    if df.empty or det_master.empty: return df.copy()
+    roll_col = roll_col if roll_col in df.columns else _find_roll_column(df)
+    name_col = name_col if name_col in df.columns else _find_name_column(df)
+    if not roll_col or not name_col: return df.copy()
     out=df.copy()
-    rolls=set(det_master['Roll No'].astype(str))
+    rolls=set(det_master['Roll No'].apply(normalize_roll).astype(str))
     hit=out[roll_col].apply(normalize_roll).isin(rolls)
-    out.loc[hit,name_col]=(
-        out.loc[hit,name_col].fillna('').astype(str)
-        .str.replace(r'\s*\(det\)\s*$','',regex=True)
-        .str.rstrip()+' (det)'
-    )
+    original=out[name_col].fillna('').astype(str).str.strip()
+    out.loc[hit,name_col]=original.loc[hit].str.replace(r'\s*\(det\)\s*$','',regex=True).str.rstrip()+' (det)'
     return out
 
-# Apply DET marking to attendance/student records before filters and reports.
-att=apply_det(att,'Enrollment No','Name')
-sl=apply_det(sl,'Enrollment No','Name')
-sp=apply_det(sp,'Enrollment No','Name')
+# Apply DET marking BEFORE every dashboard/report/filter operation.
+att=apply_det(att)
+sl=apply_det(sl)
+sp=apply_det(sp)
+cs=apply_det(cs)
+
+# DET verification preview: makes the name change visible immediately after upload.
+if not det_master.empty:
+    _det_hits=[]
+    for _df,_label in [(att,'Room/Attendance'),(sl,'Course Student List'),(sp,'Seating')]:
+        if _df.empty: continue
+        rc=_find_roll_column(_df); nc=_find_name_column(_df)
+        if rc and nc:
+            _x=_df[_df[rc].apply(normalize_roll).isin(set(det_master['Roll No'].astype(str)))][[rc,nc]].copy()
+            if not _x.empty:
+                _x.columns=['Roll No','Student Name']; _x['Source']=_label; _det_hits.append(_x)
+    if _det_hits:
+        _det_preview=pd.concat(_det_hits,ignore_index=True).drop_duplicates(['Roll No','Source'])
+        st.sidebar.success(f"DET applied: {len(_det_preview)} matching record(s) found")
+        with st.sidebar.expander('Preview changed student names',expanded=False):
+            st.dataframe(_det_preview[['Roll No','Student Name']],use_container_width=True,hide_index=True)
 
 # filters
 st.sidebar.header('Global Filters')
