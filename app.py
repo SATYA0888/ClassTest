@@ -507,88 +507,87 @@ def build_course_room_pdfs_for_date(date_value, shift_value, selected_courses=No
             result[f"{_safe_filename(course)}_{_safe_filename(shift_value)}_{_safe_filename(date_value)}.pdf"] = pdf
     return result
 
-with tabs[7]:
-    st.subheader("📦 Bulk PDF Downloads — Scheduled Papers Only")
-    st.caption("Select a date and shift. Only papers actually occurring at that time are included. Course-wise and room-wise PDFs are A4 Portrait; seat numbers are displayed as 1, 2, 3...")
+st.subheader("📦 Bulk PDF Downloads — Scheduled Papers Only")
+st.caption("Select a date and shift. Only papers actually occurring at that time are included. Course-wise and room-wise PDFs are A4 Portrait; seat numbers are displayed as 1, 2, 3...")
 
-    available_dates=sorted(att["Date"].dropna().astype(str).unique().tolist()) if not att.empty else []
-    available_shifts=sorted(att["Shift"].dropna().astype(str).unique().tolist()) if not att.empty else []
+available_dates=sorted(att["Date"].dropna().astype(str).unique().tolist()) if not att.empty else []
+available_shifts=sorted(att["Shift"].dropna().astype(str).unique().tolist()) if not att.empty else []
 
-    if not available_dates:
-        st.warning("No attendance dates are available.")
+if not available_dates:
+    st.warning("No attendance dates are available.")
+else:
+    c1,c2=st.columns(2)
+    bulk_date=c1.selectbox("Exam Date",available_dates,key="bulk_date")
+    bulk_shift=c2.selectbox("Shift",["All"]+available_shifts,key="bulk_shift")
+
+    scheduled=scheduled_papers(bulk_date,bulk_shift)
+    actual,sched=attendance_for_actual_papers(bulk_date,bulk_shift)
+
+    st.markdown("### 📋 Paper(s) actually scheduled")
+    if scheduled.empty:
+        st.error("No paper is scheduled in the Class Test Datesheet for this date/shift. Therefore, no room PDFs or course allocation PDFs will be generated.")
     else:
-        c1,c2=st.columns(2)
-        bulk_date=c1.selectbox("Exam Date",available_dates,key="bulk_date")
-        bulk_shift=c2.selectbox("Shift",["All"]+available_shifts,key="bulk_shift")
+        show=[c for c in ["Program / Branch / Semester","Paper Code","Paper Name","Time","Student Count"] if c in scheduled.columns]
+        st.dataframe(scheduled[show],use_container_width=True,hide_index=True)
 
-        scheduled=scheduled_papers(bulk_date,bulk_shift)
-        actual,sched=attendance_for_actual_papers(bulk_date,bulk_shift)
+        rooms=sorted(actual["Room"].dropna().astype(str).unique()) if not actual.empty else []
+        st.metric("Eligible rooms",len(rooms))
+        st.write("Eligible rooms: " + (", ".join(rooms) if rooms else "None"))
 
-        st.markdown("### 📋 Paper(s) actually scheduled")
-        if scheduled.empty:
-            st.error("No paper is scheduled in the Class Test Datesheet for this date/shift. Therefore, no room PDFs or course allocation PDFs will be generated.")
-        else:
-            show=[c for c in ["Program / Branch / Semester","Paper Code","Paper Name","Time","Student Count"] if c in scheduled.columns]
-            st.dataframe(scheduled[show],use_container_width=True,hide_index=True)
+        st.markdown("### 1️⃣ Room-wise attendance PDFs")
+        st.write("Only rooms containing students from a program/semester having a paper in the selected date + shift are included.")
+        st.code("ROOM_SHIFT_DATE.pdf")
 
-            rooms=sorted(actual["Room"].dropna().astype(str).unique()) if not actual.empty else []
-            st.metric("Eligible rooms",len(rooms))
-            st.write("Eligible rooms: " + (", ".join(rooms) if rooms else "None"))
+        if st.button("📄 Generate & Download Eligible Room PDFs",key="bulk_room_pdf"):
+            with st.spinner("Checking papers and generating room PDFs..."):
+                files_dict=build_room_pdfs_for_date(bulk_date,bulk_shift)
+                if files_dict:
+                    st.download_button(
+                        "⬇️ Download Eligible Room PDFs (ZIP)",
+                        _make_zip(files_dict),
+                        f"Room_Attendance_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
+                        "application/zip",key="download_room_zip")
+                    st.success(f"{len(files_dict)} room PDF(s) generated — only scheduled-paper rooms.")
+                else:
+                    st.warning("No eligible room allocation was found.")
 
-            st.markdown("### 1️⃣ Room-wise attendance PDFs")
-            st.write("Only rooms containing students from a program/semester having a paper in the selected date + shift are included.")
-            st.code("ROOM_SHIFT_DATE.pdf")
+        st.markdown("---")
+        st.markdown("### 2️⃣ Course-wise allocation PDFs")
+        course_values=sorted(actual["Course"].dropna().astype(str).unique()) if not actual.empty else []
+        selected_courses=st.multiselect("Courses/program groups",course_values,default=course_values,key="bulk_courses")
+        pair_count=actual[actual["Course"].astype(str).isin(selected_courses)]["Course"].nunique() if selected_courses and not actual.empty else 0
+        st.metric("Eligible course PDFs",pair_count)
+        st.code("COURSE_SHIFT_DATE.pdf")
 
-            if st.button("📄 Generate & Download Eligible Room PDFs",key="bulk_room_pdf"):
-                with st.spinner("Checking papers and generating room PDFs..."):
-                    files_dict=build_room_pdfs_for_date(bulk_date,bulk_shift)
-                    if files_dict:
-                        st.download_button(
-                            "⬇️ Download Eligible Room PDFs (ZIP)",
-                            _make_zip(files_dict),
-                            f"Room_Attendance_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
-                            "application/zip",key="download_room_zip")
-                        st.success(f"{len(files_dict)} room PDF(s) generated — only scheduled-paper rooms.")
-                    else:
-                        st.warning("No eligible room allocation was found.")
+        if st.button("📚 Generate & Download Eligible Course PDFs",key="bulk_course_pdf"):
+            with st.spinner("Generating course-wise allocation PDFs..."):
+                files_dict=build_course_room_pdfs_for_date(bulk_date,bulk_shift,selected_courses)
+                if files_dict:
+                    st.download_button(
+                        "⬇️ Download Eligible Course PDFs (ZIP)",
+                        _make_zip(files_dict),
+                        f"Course_Wise_Allocation_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
+                        "application/zip",key="download_course_zip")
+                    st.success(f"{len(files_dict)} course-wise PDF(s) generated.")
+                else:
+                    st.warning("No eligible course allocation was found.")
 
-            st.markdown("---")
-            st.markdown("### 2️⃣ Course-wise allocation PDFs")
-            course_values=sorted(actual["Course"].dropna().astype(str).unique()) if not actual.empty else []
-            selected_courses=st.multiselect("Courses/program groups",course_values,default=course_values,key="bulk_courses")
-            pair_count=actual[actual["Course"].astype(str).isin(selected_courses)]["Course"].nunique() if selected_courses and not actual.empty else 0
-            st.metric("Eligible course PDFs",pair_count)
-            st.code("COURSE_SHIFT_DATE.pdf")
-
-            if st.button("📚 Generate & Download Eligible Course PDFs",key="bulk_course_pdf"):
-                with st.spinner("Generating course-wise allocation PDFs..."):
-                    files_dict=build_course_room_pdfs_for_date(bulk_date,bulk_shift,selected_courses)
-                    if files_dict:
-                        st.download_button(
-                            "⬇️ Download Eligible Course PDFs (ZIP)",
-                            _make_zip(files_dict),
-                            f"Course_Wise_Allocation_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
-                            "application/zip",key="download_course_zip")
-                        st.success(f"{len(files_dict)} course-wise PDF(s) generated.")
-                    else:
-                        st.warning("No eligible course allocation was found.")
-
-            st.markdown("---")
-            st.markdown("### 3️⃣ One-click: ALL eligible PDFs")
-            if st.button("📦 Generate & Download ALL Eligible PDFs",key="bulk_all_pdf"):
-                with st.spinner("Generating only PDFs for papers actually occurring..."):
-                    room_files=build_room_pdfs_for_date(bulk_date,bulk_shift)
-                    course_files=build_course_room_pdfs_for_date(bulk_date,bulk_shift,selected_courses)
-                    combined={}
-                    for name,data in room_files.items(): combined[f"Room_Attendance/{name}"]=data
-                    for name,data in course_files.items(): combined[f"Course_Wise_Allocation/{name}"]=data
-                    if combined:
-                        st.download_button(
-                            "⬇️ Download ALL Eligible PDFs (ZIP)",
-                            _make_zip(combined),
-                            f"Exam_PDFs_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
-                            "application/zip",key="download_all_zip")
-                        st.success(f"{len(combined)} eligible PDF(s) generated.")
-                    else:
-                        st.warning("No eligible PDFs found.")
+        st.markdown("---")
+        st.markdown("### 3️⃣ One-click: ALL eligible PDFs")
+        if st.button("📦 Generate & Download ALL Eligible PDFs",key="bulk_all_pdf"):
+            with st.spinner("Generating only PDFs for papers actually occurring..."):
+                room_files=build_room_pdfs_for_date(bulk_date,bulk_shift)
+                course_files=build_course_room_pdfs_for_date(bulk_date,bulk_shift,selected_courses)
+                combined={}
+                for name,data in room_files.items(): combined[f"Room_Attendance/{name}"]=data
+                for name,data in course_files.items(): combined[f"Course_Wise_Allocation/{name}"]=data
+                if combined:
+                    st.download_button(
+                        "⬇️ Download ALL Eligible PDFs (ZIP)",
+                        _make_zip(combined),
+                        f"Exam_PDFs_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
+                        "application/zip",key="download_all_zip")
+                    st.success(f"{len(combined)} eligible PDF(s) generated.")
+                else:
+                    st.warning("No eligible PDFs found.")
 
