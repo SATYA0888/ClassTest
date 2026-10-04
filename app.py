@@ -58,65 +58,58 @@ def pdf_room_attendance(df, room, date_str, shift):
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
     from reportlab.lib.units import mm
 
-    # Exact requested columns in portrait A4.
-    out = pd.DataFrame()
-    out['Sr. No'] = range(1, len(df) + 1)
-    out['Student Name'] = df['Name'].astype(str) if 'Name' in df else ''
-    if 'Enrollment No' in df:
-        def roll(v):
-            if pd.isna(v): return ''
-            s = str(v).strip()
-            try:
-                f = float(s)
-                return str(int(f)) if f.is_integer() else s
-            except Exception:
-                return s
-        out['Roll No'] = df['Enrollment No'].apply(roll)
-    else:
-        out['Roll No'] = ''
-    out['Course'] = df['Course'].astype(str) if 'Course' in df else ''
-    out['Answer Seat No'] = df['Answer Sheet No'].fillna('').astype(str) if 'Answer Sheet No' in df else ''
-    out['Signature'] = ''
+    # Exact requested columns: Sr. No | Seat No | Name | Roll No | Course | Answer Sheet No | Signature
+    d=_add_seat_numbers(df)
+    out=pd.DataFrame()
+    out['Sr. No']=range(1,len(d)+1)
+    out['Seat No']=d['Seat No'].astype(str) if 'Seat No' in d else ''
+    out['Name']=d['Name'].astype(str) if 'Name' in d else ''
+    out['Roll No']=d['Enrollment No'].apply(_roll) if 'Enrollment No' in d else ''
+    out['Course']=d['Course'].astype(str) if 'Course' in d else ''
+    out['Answer Sheet No']=d['Answer Sheet No'].fillna('').astype(str) if 'Answer Sheet No' in d else ''
+    out['Signature']=''
 
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=7*mm, leftMargin=7*mm,
-                            topMargin=7*mm, bottomMargin=7*mm)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('roomtitle', parent=styles['Title'], alignment=TA_CENTER, fontSize=12, leading=14)
-    sub_style = ParagraphStyle('roomsub', parent=styles['Normal'], alignment=TA_CENTER, fontSize=7.5, leading=9)
-    cell = ParagraphStyle('roomcell', parent=styles['Normal'], fontSize=6.5, leading=7.5)
-    head = ParagraphStyle('roomhead', parent=styles['Normal'], fontSize=6.5, leading=7.5, alignment=TA_CENTER)
-
+    buf=io.BytesIO()
+    doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=5*mm,leftMargin=5*mm,topMargin=7*mm,bottomMargin=7*mm)
+    styles=getSampleStyleSheet()
+    title_style=ParagraphStyle('roomtitle2',parent=styles['Title'],alignment=TA_CENTER,fontSize=12,leading=14)
+    sub_style=ParagraphStyle('roomsub2',parent=styles['Normal'],alignment=TA_CENTER,fontSize=7.5,leading=9)
+    cell=ParagraphStyle('roomcell2',parent=styles['Normal'],fontSize=6.2,leading=7)
+    head=ParagraphStyle('roomhead2',parent=styles['Normal'],fontSize=6.2,leading=7,alignment=TA_CENTER)
     story=[]
     chunks=[out.iloc[i:i+24] for i in range(0,len(out),24)] or [out]
+    widths=[9*mm,16*mm,42*mm,25*mm,30*mm,27*mm,38*mm]
     for pi,chunk in enumerate(chunks):
-        story += [
-            Paragraph('ROOM-WISE ATTENDANCE SHEET', title_style),
-            Paragraph(f'Room: {room} | Date: {date_str} | Shift: {shift} | Total Students: {len(out)}', sub_style),
-            Spacer(1, 3*mm)
-        ]
-        data=[[Paragraph(c,head) for c in out.columns]]
+        story += [Paragraph('ROOM-WISE ATTENDANCE SHEET',title_style),Paragraph(f'Room: {room} | Date: {date_str} | Shift: {shift} | Total Students: {len(out)}',sub_style),Spacer(1,3*mm)]
+        data=[[Paragraph(str(c),head) for c in out.columns]]
         for row in chunk.itertuples(index=False):
             data.append([Paragraph('' if pd.isna(v) else str(v),cell) for v in row])
-        widths=[10*mm,49*mm,27*mm,23*mm,29*mm,43*mm]
-        t=Table(data,colWidths=widths,repeatRows=1)
-        t.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e9eef5')),
-            ('GRID',(0,0),(-1,-1),0.4,colors.grey),
-            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-            ('ALIGN',(0,0),(0,-1),'CENTER'),
-            ('ALIGN',(2,0),(4,-1),'CENTER'),
+        tab=Table(data,colWidths=widths,repeatRows=1)
+        tab.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e9eef5')),('GRID',(0,0),(-1,-1),0.4,colors.grey),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),('ALIGN',(0,0),(-1,0),'CENTER'),
+            ('ALIGN',(0,0),(1,-1),'CENTER'),('ALIGN',(3,0),(5,-1),'CENTER'),
             ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f8fafc')]),
-            ('LEFTPADDING',(0,0),(-1,-1),2.5),('RIGHTPADDING',(0,0),(-1,-1),2.5),
-            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+            ('LEFTPADDING',(0,0),(-1,-1),2),('RIGHTPADDING',(0,0),(-1,-1),2),('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3)
         ]))
-        story.append(t)
-        if pi < len(chunks)-1: story.append(PageBreak())
+        story.append(tab)
+        if pi<len(chunks)-1: story.append(PageBreak())
     doc.build(story)
     return buf.getvalue()
 
+def pdf_course_allocation(df, course, date_str, shift):
+    # Exact requested format: Sr. No | Name | Roll No | Seat No | Room No — Portrait A4.
+    d=_add_seat_numbers(df)
+    out=pd.DataFrame()
+    out['Sr. No']=range(1,len(d)+1)
+    out['Name']=d['Name'].astype(str) if 'Name' in d else ''
+    out['Roll No']=d['Enrollment No'].apply(_roll) if 'Enrollment No' in d else ''
+    out['Seat No']=d['Seat No'].astype(str) if 'Seat No' in d else ''
+    out['Room No']=d['Room'].astype(str) if 'Room' in d else ''
+    return pdf_table(f'COURSE-WISE ALLOCATION — {course}',f'Date: {date_str} | Shift: {shift} | Total Students: {len(out)}',out,landscape_mode=False,rows_per_page=28)
+
 def pdf_course_summary(df, course, date_str, shift):
-    return pdf_table(f'Course-wise Student Count — {course}', f'Date: {date_str} | Shift: {shift}', df, landscape_mode=True, rows_per_page=30)
+    return pdf_course_allocation(df,course,date_str,shift)
 
 # ---------------- parsing ----------------
 def clean(x): return re.sub(r'\s+',' ',str(x).strip())
@@ -382,15 +375,16 @@ def build_room_pdfs_for_date(date_value, shift_value):
     return result
 
 def build_course_room_pdfs_for_date(date_value, shift_value, selected_courses=None):
+    """Despite the historical function name, generate ONE course-wise allocation PDF per course."""
     d,sched=attendance_for_actual_papers(date_value,shift_value)
-    if d.empty or "Course" not in d.columns or "Room" not in d.columns: return {}
+    if d.empty or 'Course' not in d.columns: return {}
     if selected_courses:
-        d=d[d["Course"].astype(str).isin([str(x) for x in selected_courses])]
+        d=d[d['Course'].astype(str).isin([str(x) for x in selected_courses])]
     result={}
-    for (course,room),rv in d.groupby(["Course","Room"],dropna=False):
-        course,room=str(course),str(room)
-        pdf=pdf_room_attendance(rv,room,str(date_value),str(shift_value))
-        result[f"{_safe_filename(course)}_{_safe_filename(room)}_{_safe_filename(shift_value)}_{_safe_filename(date_value)}.pdf"]=pdf
+    for course,rv in d.groupby('Course',dropna=False):
+        course=str(course)
+        pdf=pdf_course_allocation(rv,course,str(date_value),str(shift_value))
+        result[f'{_safe_filename(course)}_{_safe_filename(shift_value)}_{_safe_filename(date_value)}.pdf']=pdf
     return result
 
 
@@ -416,7 +410,7 @@ with tabs[1]:
     else:
         room_view=af.copy()
         preview_cols=[c for c in ['S.No','Name','Enrollment No','Course','Answer Sheet No','Signature'] if c in room_view.columns]
-        st.markdown('**PDF format:** Sr. No | Student Name | Roll No | Course | Answer Seat No | Signature — Portrait A4')
+        st.markdown('**Room PDF:** Sr. No | Seat No | Name | Roll No | Course | Answer Sheet No | Signature — Portrait A4')
         st.dataframe(room_view[preview_cols] if preview_cols else room_view,use_container_width=True,hide_index=True)
         csv=room_view.to_csv(index=False).encode('utf-8')
         st.download_button('⬇️ Download Room Attendance CSV',csv,'roomwise_attendance.csv','text/csv')
@@ -533,7 +527,7 @@ with tabs[8]:
 
 with tabs[7]:
     st.subheader("📦 Bulk PDF Downloads — Scheduled Papers Only")
-    st.caption("Select a date and shift. The app first checks the Class Test Datesheet and then includes ONLY rooms/courses for which a paper is scheduled at that time.")
+    st.caption("Select a date and shift. The app checks the Class Test Datesheet and generates only eligible course-wise allocation PDFs and room-wise attendance PDFs for papers occurring at that time. All PDFs are Portrait A4.")
 
     available_dates=sorted(att["Date"].dropna().astype(str).unique().tolist()) if not att.empty else []
     available_shifts=sorted(att["Shift"].dropna().astype(str).unique().tolist()) if not att.empty else []
@@ -577,25 +571,25 @@ with tabs[7]:
                         st.warning("No eligible room allocation was found.")
 
             st.markdown("---")
-            st.markdown("### 2️⃣ Course-room allocation PDFs")
+            st.markdown("### 2️⃣ Course-wise allocation PDFs")
             course_values=sorted(actual["Course"].dropna().astype(str).unique()) if not actual.empty else []
             selected_courses=st.multiselect("Courses/program groups",course_values,default=course_values,key="bulk_courses")
-            pair_count=actual[actual["Course"].astype(str).isin(selected_courses)].groupby(["Course","Room"]).ngroups if selected_courses and not actual.empty else 0
-            st.metric("Eligible course-room PDFs",pair_count)
-            st.code("COURSE_ROOM_SHIFT_DATE.pdf")
+            pair_count=actual[actual["Course"].astype(str).isin(selected_courses)]["Course"].nunique() if selected_courses and not actual.empty else 0
+            st.metric("Eligible course PDFs",pair_count)
+            st.code("COURSE_SHIFT_DATE.pdf")
 
             if st.button("📚 Generate & Download Eligible Course PDFs",key="bulk_course_pdf"):
-                with st.spinner("Generating course-room allocation PDFs..."):
+                with st.spinner("Generating course-wise allocation PDFs..."):
                     files_dict=build_course_room_pdfs_for_date(bulk_date,bulk_shift,selected_courses)
                     if files_dict:
                         st.download_button(
                             "⬇️ Download Eligible Course PDFs (ZIP)",
                             _make_zip(files_dict),
-                            f"Course_Room_Allocation_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
+                            f"Course_Wise_Allocation_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
                             "application/zip",key="download_course_zip")
                         st.success(f"{len(files_dict)} course-room PDF(s) generated.")
                     else:
-                        st.warning("No eligible course-room allocation was found.")
+                        st.warning("No eligible course allocation was found.")
 
             st.markdown("---")
             st.markdown("### 3️⃣ One-click: ALL eligible PDFs")
@@ -605,7 +599,7 @@ with tabs[7]:
                     course_files=build_course_room_pdfs_for_date(bulk_date,bulk_shift,selected_courses)
                     combined={}
                     for name,data in room_files.items(): combined[f"Room_Attendance/{name}"]=data
-                    for name,data in course_files.items(): combined[f"Course_Room_Allocation/{name}"]=data
+                    for name,data in course_files.items(): combined[f"Course_Wise_Allocation/{name}"]=data
                     if combined:
                         st.download_button(
                             "⬇️ Download ALL Eligible PDFs (ZIP)",
