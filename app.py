@@ -31,8 +31,8 @@ def pdf_table(title, subtitle, df, landscape_mode=False, rows_per_page=28):
     from reportlab.lib.units import mm
 
     buf = io.BytesIO()
-    page = landscape(A4) if landscape_mode else portrait(A4)
-    doc = SimpleDocTemplate(buf, pagesize=page, rightMargin=8*mm, leftMargin=8*mm, topMargin=8*mm, bottomMargin=8*mm)
+    page = A4 if landscape_mode else A4
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=8*mm, leftMargin=8*mm, topMargin=8*mm, bottomMargin=8*mm)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('t', parent=styles['Title'], alignment=TA_CENTER, fontSize=14, leading=17)
     sub_style = ParagraphStyle('s', parent=styles['Normal'], alignment=TA_CENTER, fontSize=8, leading=10)
