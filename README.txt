@@ -19,3 +19,16 @@ v6: Bulk PDF downloads are schedule-aware. The app checks the Class Test Dateshe
    # ODD Minor Exam Interactive Management System
 
 Bulk PDF output: course-wise allocation and room-wise attendance, portrait A4, filtered by actual scheduled paper/date/shift.
+# ODD Minor Exam Interactive Management System
+
+Bulk PDF output: course-wise allocation and room-wise attendance, portrait A4, filtered by actual scheduled paper/date/shift.
+
+
+v12: All generated PDFs are forced to A4 portrait only. No landscape or non-A4 page sizes are used.
+
+
+v13: Fixed blank PDF generation by normalizing PDF input columns and using the actual filtered dataframe rows. Empty datasets are skipped. Course-wise PDFs are generated one populated PDF per course.
+
+
+v14: Fixed NameError caused by undefined tabs[7]. Bulk PDF section now runs at top level without requiring a missing tabs object.
+
