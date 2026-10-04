@@ -50,6 +50,27 @@ def pdf_table(title, subtitle, df, landscape_mode=True, rows_per_page=28):
     doc.build(story)
     return buf.getvalue()
 
+
+def _roll(value):
+    """Return a clean printable roll/enrollment number."""
+    return normalize_roll(value)
+
+def _add_seat_numbers(df):
+    """Ensure the attendance frame has a Seat No column.
+    Preserve an existing seat number; otherwise generate sequential seat numbers
+    in the current room/course order.
+    """
+    out = df.copy()
+    if 'Seat No' not in out.columns:
+        out['Seat No'] = range(1, len(out) + 1)
+    else:
+        vals = out['Seat No']
+        missing = vals.isna() | (vals.astype(str).str.strip().isin(['', 'nan', 'None']))
+        if missing.any():
+            generated = pd.Series(range(1, len(out) + 1), index=out.index)
+            out.loc[missing, 'Seat No'] = generated.loc[missing]
+    return out
+
 def pdf_room_attendance(df, room, date_str, shift):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
