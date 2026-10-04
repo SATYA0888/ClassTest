@@ -3,12 +3,26 @@ import zipfile, zipfile, re, os
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
+
+def format_seat_no(value):
+    """Display numeric seat numbers without Excel/Pandas .0 suffixes."""
+    if pd.isna(value):
+        return ""
+    s = str(value).strip()
+    try:
+        f = float(s)
+        if f.is_integer():
+            return str(int(f))
+        return str(f).rstrip("0").rstrip(".")
+    except (ValueError, TypeError):
+        return s
+
 import streamlit as st
 
 st.set_page_config(page_title='ODD Minor Exam Manager', page_icon='🎓', layout='wide')
 
 # ---------------- PDF helpers ----------------
-def pdf_table(title, subtitle, df, landscape_mode=True, rows_per_page=28):
+def pdf_table(title, subtitle, df, landscape_mode=False, rows_per_page=28):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape, portrait
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -56,22 +70,27 @@ def _roll(value):
     return normalize_roll(value)
 
 def _add_seat_numbers(df):
-    """Ensure the attendance frame has a Seat No column.
-    Preserve an existing seat number; otherwise generate sequential seat numbers
-    in the current room/course order.
+    """Ensure a clean integer-style Seat No column.
+    Preserve an existing Seat No/Seat No./Seat Number column; generate 1,2,3...
+    only when no usable seat number is present.
     """
     out = df.copy()
-    if 'Seat No' not in out.columns:
-        out['Seat No'] = range(1, len(out) + 1)
+    seat_col = next((c for c in ['Seat No', 'Seat No.', 'Seat Number'] if c in out.columns), None)
+    if seat_col is None:
+        out['Seat No'] = pd.Series(range(1, len(out) + 1), index=out.index, dtype='int64')
     else:
+        if seat_col != 'Seat No':
+            out = out.rename(columns={seat_col: 'Seat No'})
         vals = out['Seat No']
-        missing = vals.isna() | (vals.astype(str).str.strip().isin(['', 'nan', 'None']))
+        missing = vals.isna() | vals.astype(str).str.strip().isin(['', 'nan', 'None', 'NaN'])
         if missing.any():
             generated = pd.Series(range(1, len(out) + 1), index=out.index)
             out.loc[missing, 'Seat No'] = generated.loc[missing]
+        out['Seat No'] = out['Seat No'].apply(format_seat_no)
     return out
 
 def pdf_room_attendance(df, room, date_str, shift):
+    df = df.copy()
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -119,6 +138,7 @@ def pdf_room_attendance(df, room, date_str, shift):
     return buf.getvalue()
 
 def pdf_course_allocation(df, course, date_str, shift):
+    df = df.copy()
     # Exact requested format: Sr. No | Name | Roll No | Seat No | Room No — Portrait A4.
     d=_add_seat_numbers(df)
     out=pd.DataFrame()
@@ -588,7 +608,7 @@ with tabs[8]:
 
 with tabs[7]:
     st.subheader("📦 Bulk PDF Downloads — Scheduled Papers Only")
-    st.caption("Select a date and shift. The app checks the Class Test Datesheet and generates only eligible course-wise allocation PDFs and room-wise attendance PDFs for papers occurring at that time. All PDFs are Portrait A4.")
+    st.caption("Select a date and shift. Only papers actually occurring at that time are included. Course-wise and room-wise PDFs are A4 Portrait; seat numbers are displayed as 1, 2, 3...")
 
     available_dates=sorted(att["Date"].dropna().astype(str).unique().tolist()) if not att.empty else []
     available_shifts=sorted(att["Shift"].dropna().astype(str).unique().tolist()) if not att.empty else []
@@ -648,7 +668,7 @@ with tabs[7]:
                             _make_zip(files_dict),
                             f"Course_Wise_Allocation_{_safe_filename(bulk_date)}_{_safe_filename(bulk_shift)}.zip",
                             "application/zip",key="download_course_zip")
-                        st.success(f"{len(files_dict)} course-room PDF(s) generated.")
+                        st.success(f"{len(files_dict)} course-wise PDF(s) generated.")
                     else:
                         st.warning("No eligible course allocation was found.")
 
